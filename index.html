@@ -103,16 +103,21 @@
       position: relative; min-height: 100vh;
       display: flex; align-items: center; justify-content: center; overflow: hidden;
     }
-    .hero-bg { position: absolute; inset: 0; background: linear-gradient(160deg, #140c04 0%, #1e1208 40%, #2a0e0e 100%); }
-    .hero-stripes {
-      position: absolute; inset: 0; opacity: 0.04;
-      background-image: repeating-linear-gradient(-45deg, transparent 0px, transparent 20px, rgba(255,255,255,0.8) 20px, rgba(255,255,255,0.8) 21px);
+    .hero-bg { position: absolute; inset: 0; background: #0d0502; }
+    #fireCanvas {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 0;
     }
-    .hero-glow {
-      position: absolute; bottom: -10%; left: -5%;
-      width: 60vw; height: 60vw; max-width: 700px;
-      background: radial-gradient(circle, rgba(232,41,28,0.12) 0%, transparent 65%);
-      pointer-events: none;
+    /* dark vignette over fire so text stays readable */
+    .hero-vignette {
+      position: absolute; inset: 0; pointer-events: none; z-index: 1;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 60%, transparent 30%, rgba(5,2,1,0.55) 100%),
+        linear-gradient(to top, rgba(5,2,1,0.7) 0%, transparent 40%, rgba(5,2,1,0.5) 100%);
+    }
+    .hero-stripes {
+      position: absolute; inset: 0; opacity: 0.025; z-index: 1;
+      background-image: repeating-linear-gradient(-45deg, transparent 0px, transparent 20px, rgba(255,255,255,0.8) 20px, rgba(255,255,255,0.8) 21px);
     }
     .hero-content {
       position: relative; z-index: 2; max-width: 900px;
@@ -446,9 +451,10 @@
   <!-- ══ HERO ══ -->
   <section id="hero">
     <div class="hero-bg"></div>
+    <canvas id="fireCanvas"></canvas>
+    <div class="hero-vignette"></div>
     <div class="hero-stripes"></div>
-    <div class="hero-glow"></div>
-    <div class="hero-content">
+    <div class="hero-content" style="position:relative;z-index:2;">
       <div class="hero-eyebrow">Hamburguesería Artesanal · Usera · Madrid</div>
       <h1 class="hero-h1">
         <span>El</span>
@@ -769,6 +775,129 @@
   </div>
 
   <script>
+    // ══ FIRE CANVAS ══
+    (function() {
+      const canvas = document.getElementById('fireCanvas');
+      const ctx = canvas.getContext('2d');
+      let W, H, particles = [], animId;
+
+      function resize() {
+        W = canvas.width  = canvas.offsetWidth;
+        H = canvas.height = canvas.offsetHeight;
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      // Fire color stops: dark red → red → orange → yellow → pale yellow
+      function fireColor(life) {
+        // life 0→1 (0=young/hot, 1=old/fading)
+        const t = 1 - life;
+        if (t < 0.25) {
+          // white-yellow core
+          const p = t / 0.25;
+          return `rgba(255,${Math.round(230 + 25*p)},${Math.round(180*p)},${life * 0.9})`;
+        } else if (t < 0.5) {
+          const p = (t - 0.25) / 0.25;
+          return `rgba(255,${Math.round(160 - 60*p)},0,${life * 0.85})`;
+        } else if (t < 0.75) {
+          const p = (t - 0.5) / 0.25;
+          return `rgba(${Math.round(255 - 55*p)},${Math.round(100 - 80*p)},0,${life * 0.7})`;
+        } else {
+          const p = (t - 0.75) / 0.25;
+          return `rgba(${Math.round(200 - 100*p)},20,0,${life * (0.5 - 0.5*p)})`;
+        }
+      }
+
+      function spawn() {
+        const spread = W * 0.7;
+        const x = W / 2 + (Math.random() - 0.5) * spread;
+        particles.push({
+          x,
+          y: H + Math.random() * 40,
+          vx: (Math.random() - 0.5) * 1.2,
+          vy: -(1.8 + Math.random() * 3.5),
+          size: 18 + Math.random() * 55,
+          life: 1,            // 1 = fresh, 0 = gone
+          decay: 0.006 + Math.random() * 0.008,
+          wobble: Math.random() * Math.PI * 2,
+          wobbleSpeed: 0.04 + Math.random() * 0.06,
+        });
+      }
+
+      // occasional ember sparks
+      function spawnEmber() {
+        const spread = W * 0.5;
+        particles.push({
+          x: W / 2 + (Math.random() - 0.5) * spread,
+          y: H * 0.55 + Math.random() * H * 0.3,
+          vx: (Math.random() - 0.5) * 2.5,
+          vy: -(2 + Math.random() * 5),
+          size: 2 + Math.random() * 4,
+          life: 1,
+          decay: 0.018 + Math.random() * 0.02,
+          wobble: 0, wobbleSpeed: 0,
+          ember: true,
+        });
+      }
+
+      let frame = 0;
+      function loop() {
+        animId = requestAnimationFrame(loop);
+        frame++;
+
+        ctx.clearRect(0, 0, W, H);
+
+        // spawn flame particles
+        const spawnCount = Math.floor(W / 14);
+        for (let i = 0; i < spawnCount; i++) spawn();
+        if (frame % 4 === 0) for (let i = 0; i < 3; i++) spawnEmber();
+
+        // update + draw
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.life -= p.decay;
+          if (p.life <= 0) { particles.splice(i, 1); continue; }
+
+          p.wobble += p.wobbleSpeed;
+          p.vx += Math.sin(p.wobble) * 0.08;
+          p.x += p.vx;
+          p.y += p.vy;
+          // slow rise as it ages
+          p.vy *= 0.995;
+
+          if (p.ember) {
+            // ember: tiny bright dot
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,${Math.round(180 * p.life)},0,${p.life})`;
+            ctx.fill();
+          } else {
+            // flame blob: radial gradient circle
+            const r = p.size * (0.4 + p.life * 0.6);
+            const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+            const col = fireColor(p.life);
+            grd.addColorStop(0, col);
+            grd.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fillStyle = grd;
+            ctx.fill();
+          }
+        }
+
+        // keep particle count sane
+        if (particles.length > 1800) particles.splice(0, particles.length - 1800);
+      }
+
+      // pause fire when tab hidden (saves CPU)
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) cancelAnimationFrame(animId);
+        else loop();
+      });
+
+      loop();
+    })();
+
     // ── Navbar scroll ──
     const navbar = document.getElementById('navbar');
     window.addEventListener('scroll', () => {
